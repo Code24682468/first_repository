@@ -1,0 +1,198 @@
+services:
+
+  postgres:
+    container_name: postgres-container
+    image: postgres:16
+    hostname: postgres
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - database-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  pgadmin:
+    container_name: pgadmin-container
+    image: dpage/pgadmin4:8
+    hostname: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: 'True'
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    networks:
+      - database-network
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  zipkin:
+    image: openzipkin/zipkin:3
+    container_name: zipkin-container
+    hostname: zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - microservice-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9411/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq-container
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - microservice-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  config:
+    image: galym911/config-ms:latest
+    container_name: config-container
+    hostname: config
+    ports:
+      - "8080:8080"
+    networks:
+      - microservice-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+  registry:
+    image: galym911/registry-ms:latest
+    container_name: registry-container
+    hostname: registry
+    ports:
+      - "8761:8761"
+    depends_on:
+      - config
+    networks:
+      - microservice-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+  gateway:
+    image: galym911/gateway-ms:latest
+    container_name: gateway-container
+    hostname: gateway
+    ports:
+      - "8084:8084"
+    depends_on:
+      - zipkin
+      - registry
+      - config
+    networks:
+      - microservice-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+  company:
+    image: galym911/company-ms:1.0.0
+    container_name: company-container
+    hostname: company
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres
+      - zipkin
+      - rabbitmq
+      - registry
+      - config
+    networks:
+      - microservice-network
+      - database-network
+    environment:
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+  job:
+    image: galym911/job-ms:1.0.0
+    container_name: job-container
+    hostname: job
+    ports:
+      - "8082:8082"
+    depends_on:
+      - postgres
+      - zipkin
+      - registry
+      - config
+    networks:
+      - microservice-network
+      - database-network
+    environment:
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+  review:
+    image: galym911/review-ms:1.0.0
+    container_name: review-container
+    hostname: review
+    ports:
+      - "8083:8083"
+    depends_on:
+      - postgres
+      - zipkin
+      - rabbitmq
+      - registry
+      - config
+    networks:
+      - microservice-network
+      - database-network
+    environment:
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+
+networks:
+  microservice-network:
+    driver: bridge
+
+  database-network:
+    driver: bridge
+
+volumes:
+  postgres:
+  pgadmin:
